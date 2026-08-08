@@ -166,9 +166,14 @@ const server = http.createServer(app);
 // Socket.io
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
-    methods: ['GET', 'POST'],
-  },
+    origin: [
+      "http://localhost:5173",
+      "https://city-client.vercel.app",
+      "https://city-client-mgr2.vercel.app"
+    ],
+    methods: ["GET", "POST"],
+    credentials: true
+  }
 });
 global.io = io;
 setupSocket(io);
@@ -180,9 +185,21 @@ initBIMSockets(io);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
 // CORS
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://city-client.vercel.app",
+  "https://city-client-mgr2.vercel.app"
+];
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
-  credentials: true,
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true
 }));
 
 // Body parsers
