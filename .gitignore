@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+.env.local
+
+# Generated Prisma client
+/generated/prisma
+
+# Uploads (user content)
+uploads/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Agents/AI
+.agents/
+.claude/
+.windsurf/
+skills-lock.json

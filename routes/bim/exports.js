@@ -3,6 +3,7 @@ const auth = require('../../middleware/auth');
 const ctrl = require('../../controllers/bim/exportController');
 
 router.use(auth);
+router.get('/', ctrl.getExports);
 router.get('/:projectId', ctrl.exportProject);
 router.get('/floor/:floorId', ctrl.exportFloor);
 router.get('/:projectId/history', ctrl.getDesignHistory);

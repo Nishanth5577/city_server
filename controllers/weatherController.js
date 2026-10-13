@@ -2,7 +2,7 @@ const axios = require('axios');
 
 exports.getWeather = async (req, res, next) => {
   try {
-    const { location } = req.query;
+    const location = req.query.location || req.query.city;
     if (!location) return res.status(400).json({ message: 'Location is required.' });
 
     const apiKey = process.env.WEATHER_API_KEY;

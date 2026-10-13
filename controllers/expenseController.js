@@ -1,89 +1,75 @@
-const Expense = require('../models/Expense');
-const { sendExpenseApprovalEmail } = require('../services/emailService');
-const User = require('../models/User');
+const prisma = require('../config/prisma');
+const addId = (o) => o ? { ...o, _id: o.id } : o;
 
 exports.getExpenses = async (req, res, next) => {
   try {
-    const { project_id, category, approved_status, search, page = 1, limit = 50 } = req.query;
-    const query = {};
-    if (req.user.company_id) query.company_id = req.user.company_id;
-    if (project_id) query.project_id = project_id;
-    if (category) query.category = category;
-    if (approved_status) query.approved_status = approved_status;
-    if (search) query.description = { $regex: search, $options: 'i' };
+    const { project_id, category, approved_status, page = 1, limit = 50 } = req.query;
+    const where = {};
+    if (req.user.company_id) where.company_id = req.user.company_id;
+    if (project_id) where.project_id = project_id;
+    if (category) where.category = category;
+    if (approved_status) where.approved_status = approved_status;
 
-    const expenses = await Expense.find(query)
-      .populate('project_id', 'project_name')
-      .populate('created_by', 'name')
-      .populate('approved_by', 'name')
-      .skip((page - 1) * limit).limit(parseInt(limit)).sort({ date: -1 });
-    const total = await Expense.countDocuments(query);
-
-    // Budget stats
-    const stats = await Expense.aggregate([
-      { $match: query },
-      { $group: {
-        _id: '$approved_status',
-        total: { $sum: '$amount' },
-        count: { $sum: 1 },
-      }},
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const take = parseInt(limit);
+    const [expenses, total] = await Promise.all([
+      prisma.expense.findMany({ where, skip, take, include: { project: { select: { id: true, project_name: true } }, creator: { select: { id: true, name: true } }, approver: { select: { id: true, name: true } } }, orderBy: { date: 'desc' } }),
+      prisma.expense.count({ where }),
     ]);
+    res.json({ expenses: expenses.map(e => ({ ...e, _id: e.id, project_id: e.project ? { ...e.project, _id: e.project.id } : e.project_id, created_by: e.creator ? { ...e.creator, _id: e.creator.id } : e.created_by, approved_by: e.approver ? { ...e.approver, _id: e.approver.id } : e.approved_by })), total, page: parseInt(page), pages: Math.ceil(total / take) });
+  } catch (error) { next(error); }
+};
 
-    res.json({ expenses, total, page: parseInt(page), pages: Math.ceil(total / limit), stats });
+exports.getExpense = async (req, res, next) => {
+  try {
+    const expense = await prisma.expense.findUnique({ where: { id: req.params.id }, include: { project: { select: { id: true, project_name: true } }, creator: { select: { id: true, name: true } }, approver: { select: { id: true, name: true } } } });
+    if (!expense) return res.status(404).json({ message: 'Expense not found.' });
+    res.json(addId(expense));
   } catch (error) { next(error); }
 };
 
 exports.createExpense = async (req, res, next) => {
   try {
-    const expense = await Expense.create({
-      ...req.body,
-      created_by: req.user.userId,
-      company_id: req.user.company_id,
-    });
-    const populated = await Expense.findById(expense._id)
-      .populate('project_id', 'project_name').populate('created_by', 'name');
-    res.status(201).json(populated);
+    const data = { ...req.body, created_by: req.user.userId, company_id: req.user.company_id };
+    if (data.date) data.date = new Date(data.date);
+    delete data._id;
+    const expense = await prisma.expense.create({ data });
+    res.status(201).json(addId(expense));
   } catch (error) { next(error); }
 };
 
 exports.updateExpense = async (req, res, next) => {
   try {
-    const expense = await Expense.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true })
-      .populate('project_id', 'project_name').populate('created_by', 'name');
-    if (!expense) return res.status(404).json({ message: 'Expense not found.' });
-    res.json(expense);
-  } catch (error) { next(error); }
+    const { _id, ...data } = req.body;
+    if (data.date) data.date = new Date(data.date);
+    const expense = await prisma.expense.update({ where: { id: req.params.id }, data });
+    res.json(addId(expense));
+  } catch (error) {
+    if (error.code === 'P2025') return res.status(404).json({ message: 'Expense not found.' });
+    next(error);
+  }
 };
 
 exports.deleteExpense = async (req, res, next) => {
   try {
-    const expense = await Expense.findByIdAndDelete(req.params.id);
-    if (!expense) return res.status(404).json({ message: 'Expense not found.' });
-    res.json({ message: 'Expense deleted.' });
-  } catch (error) { next(error); }
+    await prisma.expense.delete({ where: { id: req.params.id } });
+    res.json({ message: 'Expense deleted successfully.' });
+  } catch (error) {
+    if (error.code === 'P2025') return res.status(404).json({ message: 'Expense not found.' });
+    next(error);
+  }
 };
 
 exports.approveExpense = async (req, res, next) => {
   try {
-    const { status } = req.body; // 'approved' or 'rejected'
-    const expense = await Expense.findByIdAndUpdate(
-      req.params.id,
-      { approved_status: status, approved_by: req.user.userId },
-      { new: true }
-    ).populate('project_id', 'project_name').populate('created_by', 'name email');
-
-    if (!expense) return res.status(404).json({ message: 'Expense not found.' });
-
-    // Send email to creator
-    if (expense.created_by?.email) {
-      await sendExpenseApprovalEmail(
-        expense.created_by.email,
-        status,
-        expense.amount,
-        expense.project_id?.project_name || ''
-      );
-    }
-
-    res.json(expense);
-  } catch (error) { next(error); }
+    const { status } = req.body;
+    const expense = await prisma.expense.update({
+      where: { id: req.params.id },
+      data: { approved_status: status || 'approved', approved_by: req.user.userId },
+    });
+    res.json(addId(expense));
+  } catch (error) {
+    if (error.code === 'P2025') return res.status(404).json({ message: 'Expense not found.' });
+    next(error);
+  }
 };

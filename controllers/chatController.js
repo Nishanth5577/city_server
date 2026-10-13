@@ -1,121 +1,61 @@
-const Message = require('../models/Message');
-const User = require('../models/User');
+const prisma = require('../config/prisma');
+const addId = (o) => o ? { ...o, _id: o.id } : o;
 
-exports.getUsers = async (req, res, next) => {
+exports.getMessages = async (req, res, next) => {
   try {
-    const query = {};
-    if (req.user.company_id) query.company_id = req.user.company_id;
-    const users = await User.find({ ...query, _id: { $ne: req.user.userId } })
-      .select('name email role profile_image')
-      .sort({ name: 1 });
-    res.json(users);
+    const { project_id, receiver_id, page = 1, limit = 50 } = req.query;
+    const where = {};
+    if (project_id) where.project_id = project_id;
+    if (receiver_id) {
+      where.OR = [
+        { sender_id: req.user.userId, receiver_id },
+        { sender_id: receiver_id, receiver_id: req.user.userId },
+      ];
+    }
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const take = parseInt(limit);
+    const [messages, total] = await Promise.all([
+      prisma.message.findMany({ where, skip, take, include: { sender: { select: { id: true, name: true, profile_image: true } }, receiver: { select: { id: true, name: true } } }, orderBy: { createdAt: 'asc' } }),
+      prisma.message.count({ where }),
+    ]);
+    res.json({ messages: messages.map(m => ({ ...m, _id: m.id, sender_id: m.sender ? { ...m.sender, _id: m.sender.id } : m.sender_id })), total, page: parseInt(page), pages: Math.ceil(total / take) });
   } catch (error) { next(error); }
 };
 
 exports.sendMessage = async (req, res, next) => {
   try {
-    const { receiver, project_id, message } = req.body;
-    const msgData = {
-      sender: req.user.userId,
-      receiver,
-      project_id: project_id || null,
-      message,
-    };
-
-    if (req.file) {
-      msgData.attachment = {
-        url: `/uploads/${req.file.filename}`,
-        name: req.file.originalname,
-        type: req.file.mimetype,
-      };
-    }
-
-    const msg = await Message.create(msgData);
-    const populated = await Message.findById(msg._id)
-      .populate('sender', 'name profile_image')
-      .populate('receiver', 'name profile_image');
-
-    // Emit via Socket.io
-    if (global.io) {
-      global.io.to(`user_${receiver}`).emit('chat_message', populated);
-    }
-
-    res.status(201).json(populated);
+    const data = { ...req.body, sender_id: req.user.userId };
+    delete data._id;
+    if (req.file) { data.attachment = `/uploads/${req.file.filename}`; data.att_name = req.file.originalname; data.att_type = req.file.mimetype; }
+    const message = await prisma.message.create({ data, include: { sender: { select: { id: true, name: true, profile_image: true } } } });
+    // Emit via socket
+    if (global.io) global.io.emit('new_message', { ...message, _id: message.id });
+    res.status(201).json(addId(message));
   } catch (error) { next(error); }
 };
 
-exports.getConversation = async (req, res, next) => {
+exports.markAsRead = async (req, res, next) => {
   try {
-    const { userId } = req.params;
-    const { project_id, page = 1, limit = 50 } = req.query;
-    const query = {
-      $or: [
-        { sender: req.user.userId, receiver: userId },
-        { sender: userId, receiver: req.user.userId },
-      ],
-    };
-    if (project_id) query.project_id = project_id;
-
-    const messages = await Message.find(query)
-      .populate('sender', 'name profile_image')
-      .populate('receiver', 'name profile_image')
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit).limit(parseInt(limit));
-
-    // Mark as read
-    await Message.updateMany(
-      { sender: userId, receiver: req.user.userId, read: false },
-      { read: true }
-    );
-
-    res.json({ messages: messages.reverse(), page: parseInt(page) });
+    await prisma.message.updateMany({ where: { sender_id: req.params.userId, receiver_id: req.user.userId, read: false }, data: { read: true } });
+    res.json({ message: 'Messages marked as read.' });
   } catch (error) { next(error); }
 };
 
+exports.getChatUsers = async (req, res, next) => {
+  try {
+    const where = {};
+    if (req.user.company_id) where.company_id = req.user.company_id;
+    where.id = { not: req.user.userId };
+    const users = await prisma.user.findMany({ where, select: { id: true, name: true, email: true, role: true, profile_image: true, isActive: true }, orderBy: { name: 'asc' } });
+    res.json(users.map(u => ({ ...u, _id: u.id })));
+  } catch (error) { next(error); }
+};
+
+exports.getConversation = exports.getMessages;
 exports.getConversations = async (req, res, next) => {
   try {
-    // Get unique conversation partners
-    const conversations = await Message.aggregate([
-      { $match: { $or: [{ sender: require('mongoose').Types.ObjectId.createFromHexString(req.user.userId) }, { receiver: require('mongoose').Types.ObjectId.createFromHexString(req.user.userId) }] } },
-      { $sort: { createdAt: -1 } },
-      { $group: {
-        _id: {
-          $cond: [
-            { $eq: ['$sender', require('mongoose').Types.ObjectId.createFromHexString(req.user.userId)] },
-            '$receiver',
-            '$sender',
-          ],
-        },
-        lastMessage: { $first: '$message' },
-        lastMessageAt: { $first: '$createdAt' },
-        unread: {
-          $sum: {
-            $cond: [
-              { $and: [
-                { $eq: ['$receiver', require('mongoose').Types.ObjectId.createFromHexString(req.user.userId)] },
-                { $eq: ['$read', false] },
-              ]},
-              1, 0,
-            ],
-          },
-        },
-      }},
-      { $sort: { lastMessageAt: -1 } },
-    ]);
-
-    // Populate user details
-    const userIds = conversations.map(c => c._id);
-    const users = await User.find({ _id: { $in: userIds } }).select('name email profile_image role');
-    const userMap = {};
-    users.forEach(u => { userMap[u._id.toString()] = u; });
-
-    const result = conversations.map(c => ({
-      user: userMap[c._id.toString()],
-      lastMessage: c.lastMessage,
-      lastMessageAt: c.lastMessageAt,
-      unread: c.unread,
-    }));
-
-    res.json(result);
+    const users = await prisma.user.findMany({ where: { company_id: req.user.company_id, id: { not: req.user.userId } }, select: { id: true, name: true, email: true, role: true, profile_image: true } });
+    res.json(users.map(u => ({ ...u, _id: u.id })));
   } catch (error) { next(error); }
 };
+exports.getUsers = exports.getChatUsers;

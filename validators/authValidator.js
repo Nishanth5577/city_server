@@ -53,3 +53,4 @@ module.exports = {
   forgotPasswordValidator,
   resetPasswordValidator,
 };
+

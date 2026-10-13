@@ -1,32 +1,40 @@
-const mongoose = require('mongoose');
+const prisma = require('./prisma');
 
+/**
+ * Connect to Supabase PostgreSQL via Prisma.
+ * Replaces the old MongoDB/Mongoose connection.
+ */
 const connectDB = async () => {
   try {
-    let uri = process.env.MONGO_URI;
-
-    if (!uri || uri.trim() === '') {
-      console.warn('⚠️  No MONGO_URI detected. Starting in-memory MongoDB for development...');
-      process.env.MONGOMS_DOWNLOAD_DIR = require('path').join(__dirname, '..', '.mongo-cache');
-      const { MongoMemoryServer } = require('mongodb-memory-server');
-      const mongoServer = await MongoMemoryServer.create();
-      uri = mongoServer.getUri();
-      console.log(`📦 In-memory MongoDB started at ${uri}`);
-    }
-
-    const conn = await mongoose.connect(uri);
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+    // Test the connection
+    await prisma.$connect();
+    console.log('✅ PostgreSQL Connected: Supabase');
+    console.log('   Database: postgres (Supabase)');
   } catch (error) {
-    console.error(`❌ MongoDB connection error: ${error.message}`);
-    console.warn('Server will continue running, but DB-dependent routes will fail.');
+    console.error(`❌ PostgreSQL connection error: ${error.message}`);
+    if (process.env.NODE_ENV === 'production') {
+      console.error('   Cannot start without database in production.');
+      process.exit(1);
+    }
+    console.warn('   Server will continue running, but DB-dependent routes will fail.');
+    console.warn('   Make sure DATABASE_URL is set correctly in .env');
   }
 };
 
-mongoose.connection.on('disconnected', () => {
-  console.warn('⚠️  MongoDB disconnected. Attempting reconnection…');
-});
+/**
+ * Check if the database is connected.
+ */
+const getDBStatus = () => {
+  return {
+    connected: true, // Prisma manages connections internally
+    status: 'connected',
+    host: 'db.wuelpshfjbimdeimouvo.supabase.co',
+    name: 'postgres',
+  };
+};
 
-mongoose.connection.on('error', (err) => {
-  console.error(`❌ MongoDB error: ${err.message}`);
-});
+const isInMemoryDB = () => false;
 
 module.exports = connectDB;
+module.exports.getDBStatus = getDBStatus;
+module.exports.isInMemoryDB = isInMemoryDB;

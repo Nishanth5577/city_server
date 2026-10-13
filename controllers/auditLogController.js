@@ -1,23 +1,26 @@
-const AuditLog = require('../models/AuditLog');
+const prisma = require('../config/prisma');
+const addId = (o) => o ? { ...o, _id: o.id } : o;
 
 exports.getAuditLogs = async (req, res, next) => {
   try {
-    const { user_id, module, action, start_date, end_date, page = 1, limit = 50 } = req.query;
-    const query = {};
-    if (user_id) query.user_id = user_id;
-    if (module) query.module = module;
-    if (action) query.action = { $regex: action, $options: 'i' };
-    if (start_date || end_date) {
-      query.createdAt = {};
-      if (start_date) query.createdAt.$gte = new Date(start_date);
-      if (end_date) query.createdAt.$lte = new Date(end_date);
-    }
-
-    const logs = await AuditLog.find(query)
-      .populate('user_id', 'name email')
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit).limit(parseInt(limit));
-    const total = await AuditLog.countDocuments(query);
-    res.json({ logs, total, page: parseInt(page), pages: Math.ceil(total / limit) });
+    const { module, user_id, page = 1, limit = 50 } = req.query;
+    const where = {};
+    if (module) where.module = module;
+    if (user_id) where.user_id = user_id;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const take = parseInt(limit);
+    const [logs, total] = await Promise.all([
+      prisma.auditLog.findMany({ where, skip, take, include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' } }),
+      prisma.auditLog.count({ where }),
+    ]);
+    res.json({ logs: logs.map(l => ({ ...l, _id: l.id, user_id: l.user ? { ...l.user, _id: l.user.id } : l.user_id })), total, page: parseInt(page), pages: Math.ceil(total / take) });
   } catch (error) { next(error); }
+};
+
+exports.createAuditLog = async (data) => {
+  try {
+    await prisma.auditLog.create({ data });
+  } catch (err) {
+    console.error('Audit log error:', err.message);
+  }
 };

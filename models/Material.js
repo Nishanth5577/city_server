@@ -136,5 +136,6 @@ const materialSchema = new mongoose.Schema({
 
 materialSchema.index({ project_id: 1 });
 materialSchema.index({ company_id: 1 });
+materialSchema.index({ project_id: 1, category: 1 });
 
 module.exports = mongoose.model('Material', materialSchema);

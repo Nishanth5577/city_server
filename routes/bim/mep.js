@@ -4,6 +4,10 @@ const ctrl = require('../../controllers/bim/mepController');
 
 router.use(auth);
 
+// System overview
+router.get('/', ctrl.getSystems);
+router.post('/analysis', ctrl.runAnalysis);
+
 // CRUD for MEP elements
 router.post('/:type', ctrl.createMEPElement);
 router.get('/:type/floor/:floorId', ctrl.getMEPElements);

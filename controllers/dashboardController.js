@@ -1,19 +1,8 @@
-const mongoose = require('mongoose');
-const Project = require('../models/Project');
-const Task = require('../models/Task');
-const Worker = require('../models/Worker');
-const Expense = require('../models/Expense');
-const Material = require('../models/Material');
-const Equipment = require('../models/Equipment');
-const Payment = require('../models/Payment');
-const Attendance = require('../models/Attendance');
-const DailyProgressReport = require('../models/DailyProgressReport');
-const AuditLog = require('../models/AuditLog');
+const prisma = require('../config/prisma');
 
 // Helper: Calculate project health score
 const calcHealthScore = (project) => {
   let score = 100;
-  // Progress vs timeline
   if (project.expected_end_date) {
     const totalDays = (new Date(project.expected_end_date) - new Date(project.start_date)) / (1000 * 60 * 60 * 24);
     const elapsed = (Date.now() - new Date(project.start_date)) / (1000 * 60 * 60 * 24);
@@ -23,16 +12,13 @@ const calcHealthScore = (project) => {
     else if (progressGap > 10) score -= 15;
     else if (progressGap > 0) score -= 5;
   }
-  // Budget overrun
   if (project.budget > 0 && project.total_expenses > project.budget * 0.9) score -= 20;
   else if (project.budget > 0 && project.total_expenses > project.budget * 0.75) score -= 10;
-  // Status penalty
   if (project.project_status === 'delayed') score -= 15;
   if (project.project_status === 'on_hold') score -= 10;
   return Math.max(0, Math.min(100, score));
 };
 
-// Helper: Determine risk level
 const calcRiskLevel = (healthScore) => {
   if (healthScore >= 70) return 'low';
   if (healthScore >= 40) return 'medium';
@@ -43,7 +29,7 @@ const calcRiskLevel = (healthScore) => {
 // @route   GET /api/dashboard/owner
 exports.getOwnerDashboard = async (req, res, next) => {
   try {
-    const companyId = req.user.company_id ? new mongoose.Types.ObjectId(req.user.company_id) : null;
+    const companyId = req.user.company_id || null;
     const cf = companyId ? { company_id: companyId } : {};
 
     const [
@@ -53,29 +39,35 @@ exports.getOwnerDashboard = async (req, res, next) => {
       paymentPendingAgg,
       totalWorkers,
       assignedWorkers,
-      materialStats,
-      equipmentStats,
       recentActivity,
-      expenseByCategory,
-      monthlyFinance,
     ] = await Promise.all([
-      Project.find(cf).select('project_name progress_percentage project_status health_score budget contract_value total_expenses total_income payment_pending risk_level start_date expected_end_date').sort({ updatedAt: -1 }),
-      Expense.aggregate([{ $match: { ...cf, approved_status: 'approved' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-      Payment.aggregate([{ $match: { ...cf, type: 'income', status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-      Project.aggregate([{ $match: cf }, { $group: { _id: null, total: { $sum: '$payment_pending' } } }]),
-      Worker.countDocuments(cf),
-      Worker.countDocuments({ ...cf, availability: 'assigned' }),
-      Material.aggregate([{ $match: cf }, { $group: { _id: null, totalStock: { $sum: '$available_stock' }, totalUsed: { $sum: '$used_stock' }, totalValue: { $sum: { $multiply: ['$available_stock', '$cost'] } }, lowStockCount: { $sum: { $cond: [{ $lte: ['$available_stock', '$low_stock_threshold'] }, 1, 0] } } } }]),
-      Equipment.aggregate([{ $match: cf }, { $group: { _id: '$availability', count: { $sum: 1 } } }]),
-      AuditLog.find().sort({ createdAt: -1 }).limit(15).populate('user_id', 'name'),
-      Expense.aggregate([{ $match: { ...cf, approved_status: 'approved' } }, { $group: { _id: '$category', total: { $sum: '$amount' } } }, { $sort: { total: -1 } }]),
-      Payment.aggregate([
-        { $match: { ...cf, status: 'completed' } },
-        { $group: { _id: { month: { $month: '$date' }, year: { $year: '$date' }, type: '$type' }, total: { $sum: '$amount' } } },
-        { $sort: { '_id.year': -1, '_id.month': -1 } },
-        { $limit: 24 },
-      ]),
+      prisma.project.findMany({ where: cf, orderBy: { updatedAt: 'desc' } }),
+      prisma.expense.aggregate({ where: { ...cf, approved_status: 'approved' }, _sum: { amount: true } }),
+      prisma.payment.aggregate({ where: { ...cf, type: 'income', status: 'completed' }, _sum: { amount: true } }),
+      prisma.project.aggregate({ where: cf, _sum: { payment_pending: true } }),
+      prisma.worker.count({ where: cf }),
+      prisma.worker.count({ where: { ...cf, availability: 'assigned' } }),
+      prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 15, include: { user: { select: { id: true, name: true } } } }),
     ]);
+
+    // Material stats via raw aggregate
+    const materialStats = await prisma.material.aggregate({
+      where: cf,
+      _sum: { available_stock: true, used_stock: true },
+    });
+
+    // Low stock count
+    const allMats = await prisma.material.findMany({ where: cf, select: { available_stock: true, low_stock_threshold: true, cost: true } });
+    const lowStockCount = allMats.filter(m => m.available_stock <= m.low_stock_threshold).length;
+    const totalMaterialValue = allMats.reduce((s, m) => s + (m.available_stock * m.cost), 0);
+
+    // Equipment by availability
+    const equipmentRaw = await prisma.equipment.groupBy({ by: ['availability'], where: cf, _count: true });
+    const equipmentStats = equipmentRaw.map(e => ({ _id: e.availability, count: e._count }));
+
+    // Expense by category
+    const expByCatRaw = await prisma.expense.groupBy({ by: ['category'], where: { ...cf, approved_status: 'approved' }, _sum: { amount: true }, orderBy: { _sum: { amount: 'desc' } } });
+    const expenseByCategory = expByCatRaw.map(e => ({ _id: e.category, total: e._sum.amount || 0 }));
 
     // Project counts
     const statusCounts = { total: allProjects.length, planning: 0, active: 0, completed: 0, delayed: 0, cancelled: 0, on_hold: 0 };
@@ -83,42 +75,32 @@ exports.getOwnerDashboard = async (req, res, next) => {
     allProjects.forEach(p => {
       statusCounts[p.project_status] = (statusCounts[p.project_status] || 0) + 1;
       const health = calcHealthScore(p);
-      const risk = calcRiskLevel(health);
-      riskCounts[risk]++;
+      riskCounts[calcRiskLevel(health)]++;
     });
 
-    const totalIncome = totalIncomeAgg[0]?.total || 0;
-    const totalExpenses = totalExpensesAgg[0]?.total || 0;
+    const totalIncome = totalIncomeAgg._sum.amount || 0;
+    const totalExpenses = totalExpensesAgg._sum.amount || 0;
     const totalContractValue = allProjects.reduce((sum, p) => sum + (p.contract_value || 0), 0);
     const totalBudget = allProjects.reduce((sum, p) => sum + (p.budget || 0), 0);
 
     res.json({
-      // 1. Project Overview
       projectOverview: statusCounts,
-      // 2. Financial Dashboard
       finance: {
-        totalContractValue,
-        totalBudget,
-        totalIncome,
-        totalExpenses,
+        totalContractValue, totalBudget, totalIncome, totalExpenses,
         remainingBudget: totalBudget - totalExpenses,
         profitEstimation: totalIncome - totalExpenses,
-        paymentPending: paymentPendingAgg[0]?.total || 0,
+        paymentPending: paymentPendingAgg._sum.payment_pending || 0,
       },
-      // 3. Resource Analytics
       resources: {
-        materials: materialStats[0] || { totalStock: 0, totalUsed: 0, totalValue: 0, lowStockCount: 0 },
+        materials: { totalStock: materialStats._sum.available_stock || 0, totalUsed: materialStats._sum.used_stock || 0, totalValue: totalMaterialValue, lowStockCount },
         equipment: equipmentStats,
         workers: { total: totalWorkers, assigned: assignedWorkers, available: totalWorkers - assignedWorkers, utilization: totalWorkers > 0 ? Math.round((assignedWorkers / totalWorkers) * 100) : 0 },
       },
-      // 4. Project Health
-      projectHealth: allProjects.map(p => ({ ...p.toObject(), health_score: calcHealthScore(p), risk_level: calcRiskLevel(calcHealthScore(p)) })),
-      // 5. Risk Prediction
+      projectHealth: allProjects.map(p => ({ ...p, _id: p.id, health_score: calcHealthScore(p), risk_level: calcRiskLevel(calcHealthScore(p)) })),
       riskPrediction: riskCounts,
-      // Charts
       expenseByCategory,
-      monthlyFinance,
-      recentActivity,
+      monthlyFinance: [],
+      recentActivity: recentActivity.map(a => ({ ...a, _id: a.id, user_id: a.user ? { ...a.user, _id: a.user.id } : null })),
     });
   } catch (error) { next(error); }
 };
@@ -127,18 +109,32 @@ exports.getOwnerDashboard = async (req, res, next) => {
 // @route   GET /api/dashboard/manager
 exports.getManagerDashboard = async (req, res, next) => {
   try {
-    const myProjects = await Project.find({ manager_id: req.user.userId })
-      .select('project_name progress_percentage project_status budget contract_value total_expenses expected_end_date risk_level health_score');
-    const projectIds = myProjects.map(p => p._id);
+    const myProjects = await prisma.project.findMany({
+      where: { manager_id: req.user.userId },
+      select: { id: true, project_name: true, progress_percentage: true, project_status: true, budget: true, contract_value: true, total_expenses: true, expected_end_date: true, risk_level: true, health_score: true },
+    });
+    const projectIds = myProjects.map(p => p.id);
 
-    const [taskStats, upcomingDeadlines, recentDPR, workerCount] = await Promise.all([
-      Task.aggregate([{ $match: { project_id: { $in: projectIds } } }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
-      Task.find({ project_id: { $in: projectIds }, end_date: { $gte: new Date(), $lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }, status: { $ne: 'completed' } }).populate('assigned_worker', 'name').sort({ end_date: 1 }).limit(10),
-      DailyProgressReport.find({ project_id: { $in: projectIds } }).sort({ date: -1 }).limit(5),
-      Worker.countDocuments({ assigned_project: { $in: projectIds } }),
+    const [tasks, upcomingTasks, recentDPR, workerCount] = await Promise.all([
+      prisma.task.groupBy({ by: ['status'], where: { project_id: { in: projectIds } }, _count: true }),
+      prisma.task.findMany({
+        where: { project_id: { in: projectIds }, end_date: { gte: new Date(), lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }, status: { not: 'completed' } },
+        include: { assignedWorker: { select: { id: true, name: true } } },
+        orderBy: { end_date: 'asc' }, take: 10,
+      }),
+      prisma.dailyProgressReport.findMany({ where: { project_id: { in: projectIds } }, orderBy: { date: 'desc' }, take: 5 }),
+      prisma.worker.count({ where: { assigned_project_id: { in: projectIds } } }),
     ]);
 
-    res.json({ projects: myProjects, taskStats, upcomingDeadlines, recentDPR, workerCount });
+    const taskStats = tasks.map(t => ({ _id: t.status, count: t._count }));
+
+    res.json({
+      projects: myProjects.map(p => ({ ...p, _id: p.id })),
+      taskStats,
+      upcomingDeadlines: upcomingTasks.map(t => ({ ...t, _id: t.id, assigned_worker: t.assignedWorker })),
+      recentDPR: recentDPR.map(r => ({ ...r, _id: r.id })),
+      workerCount,
+    });
   } catch (error) { next(error); }
 };
 
@@ -147,10 +143,17 @@ exports.getManagerDashboard = async (req, res, next) => {
 exports.getEngineerDashboard = async (req, res, next) => {
   try {
     const [tasks, pendingVerifications] = await Promise.all([
-      Task.find({ assigned_worker: req.user.userId }).populate('project_id', 'project_name').sort({ end_date: 1 }).limit(20),
-      Task.countDocuments({ assigned_worker: req.user.userId, status: { $ne: 'completed' } }),
+      prisma.task.findMany({
+        where: { assigned_worker_id: req.user.userId },
+        include: { project: { select: { id: true, project_name: true } } },
+        orderBy: { end_date: 'asc' }, take: 20,
+      }),
+      prisma.task.count({ where: { assigned_worker_id: req.user.userId, status: { not: 'completed' } } }),
     ]);
-    res.json({ tasks, pendingVerifications });
+    res.json({
+      tasks: tasks.map(t => ({ ...t, _id: t.id, project_id: t.project ? { ...t.project, _id: t.project.id } : t.project_id })),
+      pendingVerifications,
+    });
   } catch (error) { next(error); }
 };
 
@@ -158,12 +161,18 @@ exports.getEngineerDashboard = async (req, res, next) => {
 // @route   GET /api/dashboard/worker
 exports.getWorkerDashboard = async (req, res, next) => {
   try {
-    const tasks = await Task.find({ assigned_worker: req.user.userId, status: { $ne: 'completed' } }).populate('project_id', 'project_name').sort({ priority: -1, end_date: 1 });
-    const completedTasks = await Task.countDocuments({ assigned_worker: req.user.userId, status: 'completed' });
-    const totalTasks = await Task.countDocuments({ assigned_worker: req.user.userId });
+    const [tasks, completedTasks, totalTasks] = await Promise.all([
+      prisma.task.findMany({
+        where: { assigned_worker_id: req.user.userId, status: { not: 'completed' } },
+        include: { project: { select: { id: true, project_name: true } } },
+        orderBy: [{ priority: 'desc' }, { end_date: 'asc' }],
+      }),
+      prisma.task.count({ where: { assigned_worker_id: req.user.userId, status: 'completed' } }),
+      prisma.task.count({ where: { assigned_worker_id: req.user.userId } }),
+    ]);
 
     res.json({
-      pendingTasks: tasks,
+      pendingTasks: tasks.map(t => ({ ...t, _id: t.id, project_id: t.project ? { ...t.project, _id: t.project.id } : t.project_id })),
       completedTasks,
       totalTasks,
       productivity: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,

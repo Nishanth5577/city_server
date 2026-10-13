@@ -1,142 +1,114 @@
-const { BIMVirtualTour } = require('../../models/bim/BIMMetadata');
+// Virtual Tour Controller — tour data stored in DesignHistory with action='tour'
+const prisma = require('../../config/prisma');
 const crypto = require('crypto');
+const addId = (o) => o ? { ...o, _id: o.id } : o;
 
-// @desc    Create virtual tour
-// @route   POST /api/bim/virtual-tour
-exports.createTour = async (req, res) => {
+exports.createTour = async (req, res, next) => {
   try {
-    const { company_id, userId } = req.user;
-    const tour = await BIMVirtualTour.create({
-      ...req.body,
-      company_id,
-      created_by: userId,
-      share_token: crypto.randomBytes(16).toString('hex'),
+    const { bim_project_id, name, description, waypoints, settings } = req.body;
+    const token = crypto.randomBytes(16).toString('hex');
+    const entry = await prisma.designHistory.create({
+      data: {
+        bim_project_id, action: 'tour_created',
+        description: name || 'Virtual Tour',
+        user_id: req.user.userId, user_name: req.user.name || 'User',
+        snapshot: { name, description, waypoints: waypoints || [], settings: settings || {}, token, published: false },
+      },
     });
-    res.status(201).json(tour);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    res.status(201).json({ ...addId(entry), token });
+  } catch (err) { next(err); }
 };
 
-// @desc    Get tours for project
-// @route   GET /api/bim/virtual-tour/:projectId
-exports.getTours = async (req, res) => {
+exports.getTours = async (req, res, next) => {
   try {
-    const tours = await BIMVirtualTour.find({ bim_project_id: req.params.projectId })
-      .populate('created_by', 'name email')
-      .sort({ createdAt: -1 });
-    res.json(tours);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    const bim_project_id = req.params.projectId || req.query.bim_project_id;
+    if (!bim_project_id) return res.json([]);
+    const tours = await prisma.designHistory.findMany({
+      where: { bim_project_id, action: 'tour_created' },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(tours.map(t => ({ ...addId(t), name: t.snapshot?.name || t.description, waypoints: t.snapshot?.waypoints || [], published: t.snapshot?.published || false, token: t.snapshot?.token })));
+  } catch (err) { next(err); }
 };
 
-// @desc    Get single tour (by ID or share token)
-// @route   GET /api/bim/virtual-tour/view/:idOrToken
-exports.getTour = async (req, res) => {
+exports.getTour = async (req, res, next) => {
   try {
-    const { idOrToken } = req.params;
-    let tour = await BIMVirtualTour.findById(idOrToken).catch(() => null);
-    if (!tour) tour = await BIMVirtualTour.findOne({ share_token: idOrToken });
+    const tour = await prisma.designHistory.findUnique({ where: { id: req.params.id } });
     if (!tour) return res.status(404).json({ message: 'Tour not found' });
-    res.json(tour);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    res.json({ ...addId(tour), name: tour.snapshot?.name || tour.description, waypoints: tour.snapshot?.waypoints || [] });
+  } catch (err) { next(err); }
 };
 
-// @desc    Update tour
-// @route   PUT /api/bim/virtual-tour/:id
-exports.updateTour = async (req, res) => {
+exports.updateTour = async (req, res, next) => {
   try {
-    const tour = await BIMVirtualTour.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!tour) return res.status(404).json({ message: 'Tour not found' });
-    res.json(tour);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    const existing = await prisma.designHistory.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ message: 'Tour not found' });
+    const snapshot = { ...(existing.snapshot || {}), ...req.body };
+    const tour = await prisma.designHistory.update({ where: { id: req.params.id }, data: { snapshot, description: req.body.name || existing.description } });
+    res.json(addId(tour));
+  } catch (err) { next(err); }
 };
 
-// @desc    Delete tour
-// @route   DELETE /api/bim/virtual-tour/:id
-exports.deleteTour = async (req, res) => {
+exports.deleteTour = async (req, res, next) => {
   try {
-    const tour = await BIMVirtualTour.findByIdAndDelete(req.params.id);
-    if (!tour) return res.status(404).json({ message: 'Tour not found' });
+    await prisma.designHistory.delete({ where: { id: req.params.id } });
     res.json({ message: 'Tour deleted' });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+  } catch (err) { next(err); }
 };
 
-// @desc    Add waypoint to tour
-// @route   POST /api/bim/virtual-tour/:id/waypoints
-exports.addWaypoint = async (req, res) => {
+exports.addWaypoint = async (req, res, next) => {
   try {
-    const tour = await BIMVirtualTour.findById(req.params.id);
+    const tour = await prisma.designHistory.findUnique({ where: { id: req.params.id } });
     if (!tour) return res.status(404).json({ message: 'Tour not found' });
-    tour.waypoints.push(req.body);
-    await tour.save();
-    res.json(tour);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    const snapshot = tour.snapshot || {};
+    const waypoints = snapshot.waypoints || [];
+    waypoints.push({ id: `wp_${Date.now()}`, ...req.body, createdAt: new Date() });
+    await prisma.designHistory.update({ where: { id: req.params.id }, data: { snapshot: { ...snapshot, waypoints } } });
+    res.json({ waypoints });
+  } catch (err) { next(err); }
 };
 
-// @desc    Update waypoint
-// @route   PUT /api/bim/virtual-tour/:id/waypoints/:waypointIndex
-exports.updateWaypoint = async (req, res) => {
+exports.updateWaypoint = async (req, res, next) => {
   try {
-    const tour = await BIMVirtualTour.findById(req.params.id);
+    const tour = await prisma.designHistory.findUnique({ where: { id: req.params.id } });
     if (!tour) return res.status(404).json({ message: 'Tour not found' });
-    const idx = parseInt(req.params.waypointIndex);
-    if (idx < 0 || idx >= tour.waypoints.length) return res.status(400).json({ message: 'Invalid waypoint index' });
-    Object.assign(tour.waypoints[idx], req.body);
-    await tour.save();
-    res.json(tour);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    const snapshot = tour.snapshot || {};
+    const waypoints = (snapshot.waypoints || []).map(wp => wp.id === req.params.waypointId ? { ...wp, ...req.body } : wp);
+    await prisma.designHistory.update({ where: { id: req.params.id }, data: { snapshot: { ...snapshot, waypoints } } });
+    res.json({ waypoints });
+  } catch (err) { next(err); }
 };
 
-// @desc    Remove waypoint
-// @route   DELETE /api/bim/virtual-tour/:id/waypoints/:waypointIndex
-exports.removeWaypoint = async (req, res) => {
+exports.removeWaypoint = async (req, res, next) => {
   try {
-    const tour = await BIMVirtualTour.findById(req.params.id);
+    const tour = await prisma.designHistory.findUnique({ where: { id: req.params.id } });
     if (!tour) return res.status(404).json({ message: 'Tour not found' });
-    tour.waypoints.splice(parseInt(req.params.waypointIndex), 1);
-    await tour.save();
-    res.json(tour);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    const snapshot = tour.snapshot || {};
+    const waypoints = (snapshot.waypoints || []).filter(wp => wp.id !== req.params.waypointId);
+    await prisma.designHistory.update({ where: { id: req.params.id }, data: { snapshot: { ...snapshot, waypoints } } });
+    res.json({ waypoints });
+  } catch (err) { next(err); }
 };
 
-// @desc    Add hotspot to tour
-// @route   POST /api/bim/virtual-tour/:id/hotspots
-exports.addHotspot = async (req, res) => {
+exports.addHotspot = async (req, res, next) => {
   try {
-    const tour = await BIMVirtualTour.findById(req.params.id);
+    const tour = await prisma.designHistory.findUnique({ where: { id: req.params.id } });
     if (!tour) return res.status(404).json({ message: 'Tour not found' });
-    tour.hotspots.push(req.body);
-    await tour.save();
-    res.json(tour);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    const snapshot = tour.snapshot || {};
+    const hotspots = snapshot.hotspots || [];
+    hotspots.push({ id: `hs_${Date.now()}`, ...req.body, createdAt: new Date() });
+    await prisma.designHistory.update({ where: { id: req.params.id }, data: { snapshot: { ...snapshot, hotspots } } });
+    res.json({ hotspots });
+  } catch (err) { next(err); }
 };
 
-// @desc    Publish / unpublish tour
-// @route   PUT /api/bim/virtual-tour/:id/publish
-exports.togglePublish = async (req, res) => {
+exports.togglePublish = async (req, res, next) => {
   try {
-    const tour = await BIMVirtualTour.findById(req.params.id);
+    const tour = await prisma.designHistory.findUnique({ where: { id: req.params.id } });
     if (!tour) return res.status(404).json({ message: 'Tour not found' });
-    tour.status = tour.status === 'published' ? 'draft' : 'published';
-    await tour.save();
-    res.json(tour);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+    const snapshot = tour.snapshot || {};
+    snapshot.published = !snapshot.published;
+    await prisma.designHistory.update({ where: { id: req.params.id }, data: { snapshot } });
+    res.json({ published: snapshot.published, token: snapshot.token });
+  } catch (err) { next(err); }
 };

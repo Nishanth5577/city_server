@@ -1,0 +1,712 @@
+// ═══════════════════════════════════════════════════════════
+// CITY CONSTRUCTIONS ERP — Prisma Schema (PostgreSQL/Supabase)
+// Converted from 42 Mongoose models
+// ═══════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+
+// ═══════════════ CORE MODELS ═══════════════
+
+model User {
+  id                   String    @id @default(uuid())
+  name                 String
+  email                String    @unique
+  password             String
+  role                 String    @default("worker")
+  phone                String?
+  profile_image        String?
+  company_id           String?
+  refreshToken         String?
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
+  isActive             Boolean   @default(true)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  company              Company?  @relation(fields: [company_id], references: [id])
+  ownedCompanies       Company[] @relation("CompanyOwner")
+  managedProjects      Project[] @relation("ProjectManager")
+  createdProjects      Project[] @relation("ProjectCreator")
+  tasks                Task[]    @relation("TaskAssignee")
+  createdTasks         Task[]    @relation("TaskCreator")
+  expenses             Expense[] @relation("ExpenseCreator")
+  approvedExpenses     Expense[] @relation("ExpenseApprover")
+  payments             Payment[] @relation("PaymentCreator")
+  approvedPayments     Payment[] @relation("PaymentApprover")
+  notifications        Notification[]
+  sentMessages         Message[] @relation("MessageSender")
+  receivedMessages     Message[] @relation("MessageReceiver")
+  documents            Document[]
+  calendarEvents       CalendarEvent[]
+  activities           Activity[]
+  auditLogs            AuditLog[]
+  attendanceMarks      Attendance[] @relation("AttendanceMarker")
+  dailyReports         DailyProgressReport[]
+  bimProjects          BIMProject[]
+  stageUpdates         ConstructionStage[] @relation("StageUpdater")
+
+  @@index([company_id])
+  @@index([role])
+  @@map("users")
+}
+
+model Company {
+  id                  String   @id @default(uuid())
+  company_name        String
+  owner_id            String
+  address_street      String   @default("")
+  address_city        String   @default("")
+  address_state       String   @default("")
+  address_zip         String   @default("")
+  address_country     String   @default("")
+  contact_phone       String   @default("")
+  contact_email       String   @default("")
+  contact_website     String   @default("")
+  registration_number String   @default("")
+  gst_number          String   @default("")
+  pan_number          String   @default("")
+  logo                String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  owner               User     @relation("CompanyOwner", fields: [owner_id], references: [id])
+  users               User[]
+  projects            Project[]
+  workers             Worker[]
+  expenses            Expense[]
+  materials           Material[]
+  equipment           Equipment[]
+  suppliers           Supplier[]
+  notifications       Notification[]
+  payments            Payment[]
+  documents           Document[]
+  calendarEvents      CalendarEvent[]
+  activities          Activity[]
+  attendances         Attendance[]
+  bimProjects         BIMProject[]
+
+  @@index([owner_id])
+  @@map("companies")
+}
+
+model Project {
+  id                  String    @id @default(uuid())
+  project_id          String?   @unique
+  project_name        String
+  client_name         String
+  client_phone        String    @default("")
+  client_email        String    @default("")
+  site_street         String    @default("")
+  site_city           String    @default("")
+  site_state          String    @default("")
+  site_zip            String    @default("")
+  location            String    @default("")
+  description         String    @default("")
+  start_date          DateTime?
+  expected_end_date   DateTime?
+  actual_end_date     DateTime?
+  contract_value      Float     @default(0)
+  budget              Float     @default(0)
+  total_expenses      Float     @default(0)
+  total_income        Float     @default(0)
+  payment_pending     Float     @default(0)
+  project_status      String    @default("planning")
+  progress_percentage Float     @default(0)
+  project_type        String    @default("residential")
+  image_url           String?
+  risk_level          String    @default("low")
+  manager_id          String?
+  qr_code             String?
+  company_id          String
+  created_by          String
+  health_score        Float     @default(100)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  manager             User?     @relation("ProjectManager", fields: [manager_id], references: [id])
+  creator             User      @relation("ProjectCreator", fields: [created_by], references: [id])
+  company             Company   @relation(fields: [company_id], references: [id])
+  tasks               Task[]
+  expenses            Expense[]
+  materials           Material[]
+  stages              ConstructionStage[]
+  attendances         Attendance[]
+  messages            Message[]
+  payments            Payment[]
+  documents           Document[]
+  calendarEvents      CalendarEvent[]
+  activities          Activity[]
+  workers             Worker[]
+  dailyReports        DailyProgressReport[]
+  bimProjects         BIMProject[]
+  equipment           Equipment[]
+
+  @@index([company_id])
+  @@index([project_status])
+  @@index([manager_id])
+  @@index([created_by])
+  @@map("projects")
+}
+
+model Worker {
+  id                  String    @id @default(uuid())
+  user_id             String?
+  worker_id           String?   @unique
+  name                String
+  skill               String    @default("")
+  specialization      String    @default("")
+  experience          Float     @default(0)
+  salary              Float     @default(0)
+  salary_type         String    @default("daily")
+  availability        String    @default("available")
+  assigned_project_id String?
+  phone               String    @default("")
+  emergency_contact   String    @default("")
+  address             String    @default("")
+  aadhar_number       String    @default("")
+  bank_account        String    @default("")
+  ifsc_code           String    @default("")
+  joining_date        DateTime?
+  total_days_present  Int       @default(0)
+  total_overtime_hours Float    @default(0)
+  total_earnings      Float     @default(0)
+  total_advance       Float     @default(0)
+  total_paid          Float     @default(0)
+  tasks_completed     Int       @default(0)
+  tasks_assigned      Int       @default(0)
+  productivity_score  Float     @default(0)
+  performance_rating  Float     @default(0)
+  company_id          String
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  assigned_project    Project?  @relation(fields: [assigned_project_id], references: [id])
+  company             Company   @relation(fields: [company_id], references: [id])
+  attendances         Attendance[]
+
+  @@index([company_id])
+  @@index([assigned_project_id])
+  @@map("workers")
+}
+
+model Task {
+  id                    String    @id @default(uuid())
+  task_name             String
+  description           String    @default("")
+  project_id            String
+  assigned_worker_id    String?
+  priority              String    @default("medium")
+  start_date            DateTime?
+  end_date              DateTime?
+  status                String    @default("pending")
+  completion_percentage Float     @default(0)
+  created_by            String
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  project               Project   @relation(fields: [project_id], references: [id])
+  assignedWorker        User?     @relation("TaskAssignee", fields: [assigned_worker_id], references: [id])
+  creator               User      @relation("TaskCreator", fields: [created_by], references: [id])
+
+  @@index([project_id])
+  @@index([assigned_worker_id])
+  @@index([status])
+  @@map("tasks")
+}
+
+model Expense {
+  id              String    @id @default(uuid())
+  project_id      String
+  category        String    @default("Miscellaneous")
+  description     String    @default("")
+  amount          Float     @default(0)
+  date            DateTime  @default(now())
+  approved_status String    @default("pending")
+  approved_by     String?
+  receipt_image   String?
+  created_by      String
+  company_id      String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  project         Project   @relation(fields: [project_id], references: [id])
+  approver        User?     @relation("ExpenseApprover", fields: [approved_by], references: [id])
+  creator         User      @relation("ExpenseCreator", fields: [created_by], references: [id])
+  company         Company   @relation(fields: [company_id], references: [id])
+
+  @@index([project_id])
+  @@index([company_id])
+  @@map("expenses")
+}
+
+model Attendance {
+  id              String   @id @default(uuid())
+  worker_id       String
+  project_id      String
+  date            DateTime
+  status          String   @default("present")
+  check_in        String   @default("")
+  check_out       String   @default("")
+  hours_worked    Float    @default(8)
+  overtime_hours  Float    @default(0)
+  daily_wage      Float    @default(0)
+  notes           String   @default("")
+  marked_by       String
+  company_id      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  worker          Worker   @relation(fields: [worker_id], references: [id])
+  project         Project  @relation(fields: [project_id], references: [id])
+  marker          User     @relation("AttendanceMarker", fields: [marked_by], references: [id])
+  company         Company  @relation(fields: [company_id], references: [id])
+
+  @@unique([worker_id, date])
+  @@index([project_id, date])
+  @@index([company_id])
+  @@map("attendances")
+}
+
+model Material {
+  id                String   @id @default(uuid())
+  material_name     String
+  category          String   @default("")
+  supplier          String   @default("")
+  supplier_id       String?
+  quantity          Float    @default(0)
+  unit              String   @default("nos")
+  available_stock   Float    @default(0)
+  used_stock        Float    @default(0)
+  cost              Float    @default(0)
+  total_purchased   Float    @default(0)
+  total_issued      Float    @default(0)
+  total_returned    Float    @default(0)
+  low_stock_threshold Float  @default(10)
+  project_id        String
+  company_id        String
+  transactions      Json     @default("[]")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project           Project  @relation(fields: [project_id], references: [id])
+  company           Company  @relation(fields: [company_id], references: [id])
+
+  @@index([project_id])
+  @@index([company_id])
+  @@map("materials")
+}
+
+model Document {
+  id              String   @id @default(uuid())
+  project_id      String?
+  name            String
+  type            String   @default("other")
+  file_url        String
+  file_size       Int      @default(0)
+  mime_type       String   @default("")
+  uploaded_by     String
+  description     String   @default("")
+  company_id      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project         Project? @relation(fields: [project_id], references: [id])
+  uploader        User     @relation(fields: [uploaded_by], references: [id])
+  company         Company  @relation(fields: [company_id], references: [id])
+
+  @@index([project_id])
+  @@index([company_id])
+  @@map("documents")
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  user_id    String
+  message    String
+  type       String   @default("general")
+  status     String   @default("unread")
+  link       String?
+  company_id String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [user_id], references: [id])
+  company    Company? @relation(fields: [company_id], references: [id])
+
+  @@index([user_id, status])
+  @@map("notifications")
+}
+
+model Payment {
+  id               String    @id @default(uuid())
+  project_id       String
+  type             String    @default("expense")
+  category         String    @default("")
+  description      String    @default("")
+  amount           Float     @default(0)
+  date             DateTime  @default(now())
+  payment_mode     String    @default("cash")
+  reference_number String    @default("")
+  party_name       String    @default("")
+  supplier_id      String?
+  receipt_url      String?
+  status           String    @default("pending")
+  approved_by      String?
+  created_by       String
+  company_id       String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  project          Project   @relation(fields: [project_id], references: [id])
+  approver         User?     @relation("PaymentApprover", fields: [approved_by], references: [id])
+  creator          User      @relation("PaymentCreator", fields: [created_by], references: [id])
+  company          Company   @relation(fields: [company_id], references: [id])
+
+  @@index([project_id])
+  @@index([company_id])
+  @@map("payments")
+}
+
+model Supplier {
+  id                    String   @id @default(uuid())
+  company_name          String
+  contact_person        String   @default("")
+  phone                 String   @default("")
+  email                 String   @default("")
+  address               String   @default("")
+  city                  String   @default("")
+  state                 String   @default("")
+  zip                   String   @default("")
+  gst_number            String   @default("")
+  rating                Float    @default(0)
+  total_orders          Int      @default(0)
+  total_amount_paid     Float    @default(0)
+  total_amount_pending  Float    @default(0)
+  status                String   @default("active")
+  notes                 String   @default("")
+  company_id            String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  company               Company  @relation(fields: [company_id], references: [id])
+
+  @@index([company_id])
+  @@map("suppliers")
+}
+
+model Equipment {
+  id                       String    @id @default(uuid())
+  equipment_name           String
+  type                     String    @default("")
+  model_number             String    @default("")
+  serial_number            String    @default("")
+  purchase_date            DateTime?
+  purchase_cost            Float     @default(0)
+  assigned_project_id      String?
+  operator                 String    @default("")
+  availability             String    @default("available")
+  maintenance_date         DateTime?
+  next_maintenance         DateTime?
+  maintenance_interval_days Int      @default(90)
+  condition                String    @default("good")
+  cost_per_day             Float     @default(0)
+  total_hours_used         Float     @default(0)
+  company_id               String
+  maintenance_history      Json      @default("[]")
+  usage_log                Json      @default("[]")
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  assigned_project         Project?  @relation(fields: [assigned_project_id], references: [id])
+  company                  Company   @relation(fields: [company_id], references: [id])
+
+  @@index([company_id])
+  @@map("equipment")
+}
+
+model ConstructionStage {
+  id                    String    @id @default(uuid())
+  project_id            String
+  stage_name            String
+  stage_order           Int
+  status                String    @default("not_started")
+  completion_percentage Float     @default(0)
+  start_date            DateTime?
+  end_date              DateTime?
+  estimated_cost        Float     @default(0)
+  actual_cost           Float     @default(0)
+  assigned_workers      Json      @default("[]")
+  required_materials    Json      @default("[]")
+  photos                Json      @default("[]")
+  engineer_approval     Json      @default("{}")
+  notes                 String    @default("")
+  updated_by            String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  project               Project   @relation(fields: [project_id], references: [id])
+  updater               User?     @relation("StageUpdater", fields: [updated_by], references: [id])
+
+  @@index([project_id, stage_order])
+  @@map("construction_stages")
+}
+
+model CalendarEvent {
+  id          String    @id @default(uuid())
+  title       String
+  description String    @default("")
+  start       DateTime
+  end         DateTime?
+  all_day     Boolean   @default(false)
+  type        String    @default("other")
+  color       String    @default("#3b82f6")
+  project_id  String?
+  created_by  String
+  company_id  String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project     Project?  @relation(fields: [project_id], references: [id])
+  creator     User      @relation(fields: [created_by], references: [id])
+  company     Company   @relation(fields: [company_id], references: [id])
+
+  @@index([company_id, start])
+  @@map("calendar_events")
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  sender_id   String
+  receiver_id String?
+  project_id  String?
+  message     String   @default("")
+  attachment  String?
+  att_name    String?
+  att_type    String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sender      User     @relation("MessageSender", fields: [sender_id], references: [id])
+  receiver    User?    @relation("MessageReceiver", fields: [receiver_id], references: [id])
+  project     Project? @relation(fields: [project_id], references: [id])
+
+  @@index([sender_id])
+  @@index([receiver_id])
+  @@index([project_id])
+  @@map("messages")
+}
+
+model Activity {
+  id          String   @id @default(uuid())
+  type        String   @default("general")
+  action      String
+  description String   @default("")
+  module      String   @default("General")
+  user_id     String?
+  user_name   String   @default("System")
+  project_id  String?
+  metadata    Json     @default("{}")
+  company_id  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User?    @relation(fields: [user_id], references: [id])
+  project     Project? @relation(fields: [project_id], references: [id])
+  company     Company? @relation(fields: [company_id], references: [id])
+
+  @@index([company_id, createdAt(sort: Desc)])
+  @@index([project_id])
+  @@map("activities")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  user_id    String
+  user_name  String   @default("")
+  action     String
+  module     String
+  entity_id  String?
+  old_value  Json?
+  new_value  Json?
+  ip_address String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [user_id], references: [id])
+
+  @@index([user_id])
+  @@index([module])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model DailyProgressReport {
+  id              String   @id @default(uuid())
+  project_id      String
+  date            DateTime
+  description     String   @default("")
+  completed_work  String   @default("")
+  percentage      Float    @default(0)
+  workers_present Int      @default(0)
+  materials_used  Json     @default("[]")
+  equipment_used  Json     @default("[]")
+  problems        String   @default("")
+  images          Json     @default("[]")
+  weather         Json     @default("{}")
+  created_by      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project         Project  @relation(fields: [project_id], references: [id])
+  creator         User     @relation(fields: [created_by], references: [id])
+
+  @@index([project_id, date(sort: Desc)])
+  @@map("daily_progress_reports")
+}
+
+// ═══════════════ BIM MODELS ═══════════════
+
+model BIMProject {
+  id                String   @id @default(uuid())
+  project_id        String
+  company_id        String
+  created_by        String
+  design_name       String
+  description       String   @default("")
+  status            String   @default("draft")
+  site_data         Json     @default("{}")
+  coordinate_system String   @default("metric")
+  grid_spacing      Float    @default(100)
+  snap_enabled      Boolean  @default(true)
+  buildings         Json     @default("[]")
+  canvas_settings   Json     @default("{}")
+  layer_visibility  Json     @default("{}")
+  collaborators     Json     @default("[]")
+  version           Int      @default(1)
+  thumbnail         String?
+  tags              Json     @default("[]")
+  is_template       Boolean  @default(false)
+  building_data     Json?
+  element_counts    Json     @default("{}")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project           Project  @relation(fields: [project_id], references: [id])
+  company           Company  @relation(fields: [company_id], references: [id])
+  creator           User     @relation(fields: [created_by], references: [id])
+
+  @@index([project_id])
+  @@index([company_id])
+  @@index([created_by])
+  @@index([status])
+  @@map("bim_projects")
+}
+
+model BuildingMaterial {
+  id                    String   @id @default(uuid())
+  name                  String
+  category              String   @default("concrete")
+  unit                  String   @default("sqm")
+  cost_per_unit         Float    @default(0)
+  density               Float    @default(0)
+  compressive_strength  Float    @default(0)
+  tensile_strength      Float    @default(0)
+  thermal_conductivity  Float    @default(0)
+  fire_rating           String   @default("none")
+  color                 String   @default("#808080")
+  roughness             Float    @default(0.5)
+  metalness             Float    @default(0)
+  opacity               Float    @default(1)
+  specifications        Json     @default("{}")
+  is_default            Boolean  @default(false)
+  company_id            String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([category])
+  @@index([company_id])
+  @@map("building_materials")
+}
+
+model CostEstimation {
+  id              String   @id @default(uuid())
+  bim_project_id  String
+  name            String   @default("")
+  description     String   @default("")
+  items           Json     @default("[]")
+  total_cost      Float    @default(0)
+  status          String   @default("draft")
+  created_by      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([bim_project_id])
+  @@map("cost_estimations")
+}
+
+model DesignHistory {
+  id              String   @id @default(uuid())
+  bim_project_id  String
+  action          String
+  description     String   @default("")
+  user_id         String?
+  user_name       String   @default("System")
+  snapshot        Json?
+  createdAt       DateTime @default(now())
+
+  @@index([bim_project_id])
+  @@map("design_histories")
+}
+
+model DrawingFile {
+  id              String   @id @default(uuid())
+  bim_project_id  String
+  name            String
+  file_url        String
+  file_type       String   @default("")
+  file_size       Int      @default(0)
+  uploaded_by     String
+  description     String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([bim_project_id])
+  @@map("drawing_files")
+}
+
+model StructuralDesign {
+  id              String   @id @default(uuid())
+  bim_project_id  String
+  design_data     Json     @default("{}")
+  analysis_result Json?
+  status          String   @default("draft")
+  created_by      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([bim_project_id])
+  @@map("structural_designs")
+}
+
+model IFCExport {
+  id              String   @id @default(uuid())
+  bim_project_id  String
+  file_url        String?
+  format          String   @default("ifc")
+  status          String   @default("pending")
+  export_options  Json     @default("{}")
+  created_by      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([bim_project_id])
+  @@map("ifc_exports")
+}

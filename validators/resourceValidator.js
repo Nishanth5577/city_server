@@ -29,26 +29,21 @@ const workerValidator = [
     .trim()
     .notEmpty().withMessage('Worker name is required')
     .isLength({ max: 200 }).withMessage('Name must be at most 200 characters'),
-  body('role')
+  body('skill')
     .trim()
-    .notEmpty().withMessage('Role is required')
-    .isIn(['mason', 'carpenter', 'electrician', 'plumber', 'painter', 'welder', 'helper', 'driver', 'operator', 'supervisor', 'engineer', 'foreman', 'laborer', 'other'])
-    .withMessage('Invalid worker role'),
+    .notEmpty().withMessage('Skill is required'),
   body('phone')
-    .optional()
-    .trim()
-    .matches(/^[0-9]{10}$/).withMessage('Phone must be a 10-digit number'),
-  body('daily_wage')
-    .optional()
-    .isFloat({ min: 0 }).withMessage('Daily wage must be a non-negative number'),
+    .optional({ values: 'falsy' })
+    .trim(),
+  body('salary')
+    .optional({ values: 'falsy' }),
   body('emergency_contact')
-    .optional()
+    .optional({ values: 'falsy' })
     .trim()
     .isLength({ max: 200 }).withMessage('Emergency contact must be at most 200 characters'),
   body('aadhar_number')
-    .optional()
-    .trim()
-    .matches(/^[0-9]{12}$/).withMessage('Aadhar number must be 12 digits'),
+    .optional({ values: 'falsy' })
+    .trim(),
 ];
 
 const materialValidator = [
@@ -80,58 +75,51 @@ const materialValidator = [
 
 const paymentValidator = [
   body('type')
-    .notEmpty().withMessage('Payment type is required')
-    .isIn(['income', 'expense']).withMessage('Type must be income or expense'),
+    .notEmpty().withMessage('Payment type is required'),
   body('amount')
-    .notEmpty().withMessage('Amount is required')
-    .isFloat({ min: 0.01 }).withMessage('Amount must be a positive number'),
+    .notEmpty().withMessage('Amount is required'),
   body('category')
     .trim()
     .notEmpty().withMessage('Category is required'),
-  body('description')
-    .optional()
-    .trim()
-    .isLength({ max: 500 }).withMessage('Description must be at most 500 characters'),
-  body('project_id')
-    .optional()
-    .isMongoId().withMessage('Invalid project ID'),
-  body('date')
-    .optional()
-    .isISO8601().withMessage('Invalid date format'),
-  body('payment_mode')
-    .optional()
-    .isIn(['cash', 'bank_transfer', 'cheque', 'upi', 'card'])
-    .withMessage('Invalid payment mode'),
-  body('party_name')
-    .optional()
-    .trim()
-    .isLength({ max: 200 }).withMessage('Party name must be at most 200 characters'),
 ];
 
 const supplierValidator = [
-  body('name')
+  body('company_name')
     .trim()
-    .notEmpty().withMessage('Supplier name is required')
-    .isLength({ max: 200 }).withMessage('Name must be at most 200 characters'),
+    .notEmpty().withMessage('Supplier company name is required')
+    .isLength({ max: 200 }).withMessage('Company name must be at most 200 characters'),
   body('contact_person')
     .optional()
     .trim()
     .isLength({ max: 200 }).withMessage('Contact person must be at most 200 characters'),
   body('email')
-    .optional()
+    .optional({ values: 'falsy' })
     .isEmail().withMessage('Invalid email format'),
   body('phone')
     .optional()
     .trim()
-    .matches(/^[0-9]{10}$/).withMessage('Phone must be a 10-digit number'),
+    .isLength({ max: 20 }).withMessage('Phone must be at most 20 characters'),
   body('gst_number')
     .optional()
     .trim()
-    .matches(/^[0-9A-Z]{15}$/).withMessage('GST number must be 15 alphanumeric characters'),
+    .isLength({ max: 20 }).withMessage('GST number must be at most 20 characters'),
   body('address')
     .optional()
+    .isObject().withMessage('Address must be an object'),
+  body('address.street').optional().trim().isLength({ max: 200 }).withMessage('Street must be at most 200 characters'),
+  body('address.city').optional().trim().isLength({ max: 100 }).withMessage('City must be at most 100 characters'),
+  body('address.state').optional().trim().isLength({ max: 100 }).withMessage('State must be at most 100 characters'),
+  body('address.zip').optional().trim().isLength({ max: 10 }).withMessage('ZIP must be at most 10 characters'),
+  body('materials_supplied')
+    .optional()
+    .isArray().withMessage('Materials supplied must be an array'),
+  body('rating')
+    .optional()
+    .isInt({ min: 0, max: 3 }).withMessage('Rating must be between 0 and 3'),
+  body('notes')
+    .optional()
     .trim()
-    .isLength({ max: 500 }).withMessage('Address must be at most 500 characters'),
+    .isLength({ max: 2000 }).withMessage('Notes must be at most 2000 characters'),
 ];
 
 const equipmentValidator = [
@@ -159,3 +147,4 @@ module.exports = {
   supplierValidator,
   equipmentValidator,
 };
+

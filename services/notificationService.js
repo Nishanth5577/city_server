@@ -1,13 +1,14 @@
-const Notification = require('../models/Notification');
+const prisma = require('../config/prisma');
 
 const createNotification = async ({ user_id, message, type, link, metadata }) => {
   try {
-    const notification = await Notification.create({ user_id, message, type, link, metadata });
-    // If socket.io instance is available, emit in real-time
+    const notification = await prisma.notification.create({
+      data: { user_id, message, type, link, metadata: metadata || {} },
+    });
     if (global.io) {
-      global.io.to(`user_${user_id}`).emit('notification', notification);
+      global.io.to(`user_${user_id}`).emit('notification', { ...notification, _id: notification.id });
     }
-    return notification;
+    return { ...notification, _id: notification.id };
   } catch (error) {
     console.error('Failed to create notification:', error.message);
     return null;
@@ -16,10 +17,9 @@ const createNotification = async ({ user_id, message, type, link, metadata }) =>
 
 const broadcastToRole = async (companyId, role, { message, type, link }) => {
   try {
-    const User = require('../models/User');
-    const users = await User.find({ company_id: companyId, role });
+    const users = await prisma.user.findMany({ where: { company_id: companyId, role } });
     const notifications = await Promise.all(
-      users.map(u => createNotification({ user_id: u._id, message, type, link }))
+      users.map(u => createNotification({ user_id: u.id, message, type, link }))
     );
     return notifications.filter(Boolean);
   } catch (error) {

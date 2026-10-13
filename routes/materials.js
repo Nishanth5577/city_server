@@ -8,6 +8,7 @@ const { materialValidator } = require('../validators/resourceValidator');
 const { getMaterials, createMaterial, updateMaterial, deleteMaterial, useStock, getLowStockAlerts } = require('../controllers/materialController');
 
 router.get('/alerts/low-stock', auth, getLowStockAlerts);
+router.get('/low-stock', auth, getLowStockAlerts);
 router.get('/', auth, getMaterials);
 router.post('/', auth, authorize('admin', 'project_manager', 'engineer'), materialValidator, validate, auditLog('materials', 'Created material'), createMaterial);
 router.put('/:id', auth, authorize('admin', 'project_manager', 'engineer'), materialValidator, validate, auditLog('materials', 'Updated material'), updateMaterial);

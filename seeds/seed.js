@@ -11,12 +11,54 @@ const Material = require('../models/Material');
 const Equipment = require('../models/Equipment');
 const Worker = require('../models/Worker');
 const Expense = require('../models/Expense');
+const Supplier = require('../models/Supplier');
+const Payment = require('../models/Payment');
 const { CONSTRUCTION_STAGES } = require('../utils/constants');
 
 const seed = async () => {
   try {
+    const args = process.argv.slice(2);
+    const forceMode = args.includes('--force');
+    const safeMode = args.includes('--safe');
+
     await connectDB();
+
+    const uri = process.env.MONGODB_URI || process.env.MONGO_URI || '';
+    const isAtlas = uri.includes('mongodb+srv') || uri.includes('mongodb.net');
+
+    // Safety check: prevent accidental data wipe on Atlas
+    if (isAtlas && !forceMode && !safeMode) {
+      console.error('');
+      console.error('⚠️  WARNING: You are connected to MongoDB Atlas!');
+      console.error(`   Host: ${mongoose.connection.host}`);
+      console.error(`   Database: ${mongoose.connection.name}`);
+      console.error('');
+      console.error('   This will DELETE ALL DATA in the database.');
+      console.error('');
+      console.error('   Options:');
+      console.error('     npm run seed -- --force   → Wipe and reseed (DESTRUCTIVE)');
+      console.error('     npm run seed -- --safe    → Seed ONLY if database is empty');
+      console.error('');
+      process.exit(1);
+    }
+
+    // Safe mode: check if data already exists
+    if (safeMode) {
+      const existingUsers = await User.countDocuments();
+      if (existingUsers > 0) {
+        console.log('✅ Database already has data. Skipping seed (safe mode).');
+        console.log(`   Users: ${existingUsers}`);
+        console.log(`   Projects: ${await Project.countDocuments()}`);
+        console.log(`   Workers: ${await Worker.countDocuments()}`);
+        process.exit(0);
+      }
+      console.log('📦 Database is empty. Seeding in safe mode...');
+    }
+
     console.log('🌱 Seeding database...');
+    if (isAtlas) {
+      console.log(`   Target: Atlas (${mongoose.connection.host}/${mongoose.connection.name})`);
+    }
 
     // Clear existing data
     await Promise.all([
@@ -29,6 +71,8 @@ const seed = async () => {
       Equipment.deleteMany({}),
       Worker.deleteMany({}),
       Expense.deleteMany({}),
+      Supplier.deleteMany({}),
+      Payment.deleteMany({}),
     ]);
 
     // Create admin user
@@ -165,11 +209,11 @@ const seed = async () => {
 
     // Create workers
     await Worker.create([
-      { name: 'Ramesh Yadav', skill: 'Mason', experience: 8, salary: 800, salary_type: 'daily', availability: 'assigned', assigned_project: projects[0]._id, phone: '9876543214', company_id: company._id, user_id: worker._id },
-      { name: 'Sunil Kumar', skill: 'Welder', experience: 12, salary: 1000, salary_type: 'daily', availability: 'assigned', assigned_project: projects[0]._id, phone: '9876543215', company_id: company._id },
-      { name: 'Manoj Singh', skill: 'Electrician', experience: 6, salary: 900, salary_type: 'daily', availability: 'assigned', assigned_project: projects[0]._id, phone: '9876543216', company_id: company._id },
-      { name: 'Deepak Sharma', skill: 'Plumber', experience: 5, salary: 850, salary_type: 'daily', availability: 'available', phone: '9876543217', company_id: company._id },
-      { name: 'Ravi Verma', skill: 'Carpenter', experience: 10, salary: 950, salary_type: 'daily', availability: 'assigned', assigned_project: projects[1]._id, phone: '9876543218', company_id: company._id },
+      { worker_id: 'CC-WRK-0001', name: 'Ramesh Yadav', skill: 'Mason', experience: 8, salary: 800, salary_type: 'daily', availability: 'assigned', assigned_project: projects[0]._id, phone: '9876543214', company_id: company._id, user_id: worker._id },
+      { worker_id: 'CC-WRK-0002', name: 'Sunil Kumar', skill: 'Welder', experience: 12, salary: 1000, salary_type: 'daily', availability: 'assigned', assigned_project: projects[0]._id, phone: '9876543215', company_id: company._id },
+      { worker_id: 'CC-WRK-0003', name: 'Manoj Singh', skill: 'Electrician', experience: 6, salary: 900, salary_type: 'daily', availability: 'assigned', assigned_project: projects[0]._id, phone: '9876543216', company_id: company._id },
+      { worker_id: 'CC-WRK-0004', name: 'Deepak Sharma', skill: 'Plumber', experience: 5, salary: 850, salary_type: 'daily', availability: 'available', phone: '9876543217', company_id: company._id },
+      { worker_id: 'CC-WRK-0005', name: 'Ravi Verma', skill: 'Carpenter', experience: 10, salary: 950, salary_type: 'daily', availability: 'assigned', assigned_project: projects[1]._id, phone: '9876543218', company_id: company._id },
     ]);
 
     // Create expenses

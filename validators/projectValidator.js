@@ -27,17 +27,15 @@ const taskValidator = [
     .notEmpty().withMessage('Task name is required')
     .isLength({ max: 200 }).withMessage('Task name must be at most 200 characters'),
   body('project_id')
-    .notEmpty().withMessage('Project ID is required')
-    .isMongoId().withMessage('Invalid project ID'),
+    .notEmpty().withMessage('Project ID is required'),
   body('priority')
     .optional()
     .isIn(['low', 'medium', 'high', 'critical']).withMessage('Invalid priority'),
   body('start_date')
-    .optional()
-    .isISO8601().withMessage('Invalid start date'),
+    .optional({ values: 'falsy' }),
   body('end_date')
-    .optional()
-    .isISO8601().withMessage('Invalid end date'),
+    .optional({ values: 'falsy' }),
 ];
 
 module.exports = { projectValidator, taskValidator };
+

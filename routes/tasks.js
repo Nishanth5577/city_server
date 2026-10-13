@@ -12,7 +12,7 @@ const {
 router.get('/', auth, getTasks);
 router.get('/gantt/:projectId', auth, getGanttTasks);
 router.get('/:id', auth, getTask);
-router.post('/', auth, authorize('admin', 'project_manager', 'engineer'), taskValidator, validate, auditLog('tasks', 'Created task'), createTask);
+router.post('/', auth, authorize('admin', 'project_manager', 'engineer'), auditLog('tasks', 'Created task'), createTask);
 router.put('/:id', auth, authorize('admin', 'project_manager', 'engineer'), auditLog('tasks', 'Updated task'), updateTask);
 router.patch('/:id/status', auth, auditLog('tasks', 'Updated task status'), updateTaskStatus);
 router.delete('/:id', auth, authorize('admin', 'project_manager'), auditLog('tasks', 'Deleted task'), deleteTask);

@@ -44,6 +44,17 @@ const bimProjectSchema = new mongoose.Schema({
   thumbnail: { type: String, default: null },
   tags: [String],
   is_template: { type: Boolean, default: false },
+  // Complete 3D building state from Design Studio (Zustand bimStore)
+  building_data: { type: mongoose.Schema.Types.Mixed, default: null },
+  // Quick element counts for dashboard/listing display
+  element_counts: {
+    walls: { type: Number, default: 0 },
+    doors: { type: Number, default: 0 },
+    windows: { type: Number, default: 0 },
+    rooms: { type: Number, default: 0 },
+    floors: { type: Number, default: 0 },
+    furniture: { type: Number, default: 0 },
+  },
 }, { timestamps: true });
 
 bimProjectSchema.index({ project_id: 1 });

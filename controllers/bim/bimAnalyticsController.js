@@ -1,91 +1,75 @@
-const BIMProject = require('../../models/bim/BIMProject');
-const BIMBuilding = require('../../models/bim/Building');
-const BIMFloor = require('../../models/bim/Floor');
-const BIMWall = require('../../models/bim/Wall');
-const BIMColumn = require('../../models/bim/Column');
-const BIMDoor = require('../../models/bim/Door');
-const BIMWindow = require('../../models/bim/Window');
-const BIMCostEstimation = require('../../models/bim/CostEstimation');
-const { BIMDesignApproval } = require('../../models/bim/BIMMetadata');
+const prisma = require('../../config/prisma');
+const addId = (o) => o ? { ...o, _id: o.id } : o;
 
-// @desc    Get BIM analytics
-// @route   GET /api/bim/analytics
+// GET /api/bim/analytics — BIM project analytics dashboard
 exports.getAnalytics = async (req, res, next) => {
   try {
-    const { company_id } = req.user;
+    const company_id = req.user.company_id;
+    const where = company_id ? { company_id } : {};
 
-    const [totalDesigns, draftDesigns, approvedDesigns, rejectedDesigns] = await Promise.all([
-      BIMProject.countDocuments({ company_id }),
-      BIMProject.countDocuments({ company_id, status: 'draft' }),
-      BIMProject.countDocuments({ company_id, status: 'approved' }),
-      BIMDesignApproval.countDocuments({ company_id, status: 'rejected' }),
+    const [totalProjects, activeProjects, completedProjects, totalMaterials, costEstimations, recentProjects] = await Promise.all([
+      prisma.bIMProject.count({ where }),
+      prisma.bIMProject.count({ where: { ...where, status: 'active' } }),
+      prisma.bIMProject.count({ where: { ...where, status: 'completed' } }),
+      prisma.buildingMaterial.count(),
+      prisma.costEstimation.findMany({ take: 10, orderBy: { createdAt: 'desc' } }),
+      prisma.bIMProject.findMany({ where, take: 5, orderBy: { updatedAt: 'desc' }, select: { id: true, design_name: true, status: true, description: true, updatedAt: true } }),
     ]);
 
-    const inProgress = await BIMProject.countDocuments({ company_id, status: 'in_progress' });
-    const inReview = await BIMProject.countDocuments({ company_id, status: 'review' });
+    // Calculate total estimated cost
+    const totalEstimatedCost = costEstimations.reduce((sum, e) => sum + (e.total_cost || 0), 0);
 
-    // Element counts
-    const projects = await BIMProject.find({ company_id }).select('_id');
-    const projectIds = projects.map(p => p._id);
+    // Material category distribution
+    const materialsByCategory = await prisma.buildingMaterial.groupBy({ by: ['category'], _count: { id: true } });
+    const materialDistribution = materialsByCategory.map(m => ({ category: m.category, count: m._count.id }));
 
-    const [wallCount, columnCount, doorCount, windowCount, floorCount, buildingCount] = await Promise.all([
-      BIMWall.countDocuments({ bim_project_id: { $in: projectIds } }),
-      BIMColumn.countDocuments({ bim_project_id: { $in: projectIds } }),
-      BIMDoor.countDocuments({ bim_project_id: { $in: projectIds } }),
-      BIMWindow.countDocuments({ bim_project_id: { $in: projectIds } }),
-      BIMFloor.countDocuments({ bim_project_id: { $in: projectIds } }),
-      BIMBuilding.countDocuments({ bim_project_id: { $in: projectIds } }),
-    ]);
+    // Project status distribution
+    const projectsByStatus = await prisma.bIMProject.groupBy({ by: ['status'], where, _count: { id: true } });
+    const projectTypeDistribution = projectsByStatus.map(p => ({ type: p.status || 'draft', count: p._count.id }));
 
-    // Cost summary
-    const costEstimations = await BIMCostEstimation.find({ company_id });
-    const totalEstimatedCost = costEstimations.reduce((sum, c) => sum + (c.summary?.total_cost || 0), 0);
-    const totalArea = costEstimations.reduce((sum, c) => sum + (c.total_area_sqft || 0), 0);
-    const avgCostPerSqft = totalArea > 0 ? Math.round(totalEstimatedCost / totalArea) : 0;
-
-    // Recent projects
-    const recentProjects = await BIMProject.find({ company_id })
-      .populate('project_id', 'project_name')
-      .populate('created_by', 'name')
-      .sort({ updatedAt: -1 })
-      .limit(5);
-
-    // Cost by category
-    const costByCategory = {};
-    costEstimations.forEach(est => {
-      if (est.summary) {
-        Object.entries(est.summary.toObject ? est.summary.toObject() : est.summary).forEach(([key, val]) => {
-          if (key !== 'subtotal' && key !== 'gst_percent' && key !== 'gst_amount' && key !== 'total_cost' && typeof val === 'number') {
-            costByCategory[key] = (costByCategory[key] || 0) + val;
-          }
-        });
-      }
-    });
 
     res.json({
       overview: {
-        totalDesigns,
-        draftDesigns,
-        inProgress,
-        inReview,
-        approvedDesigns,
-        rejectedDesigns,
-      },
-      elements: {
-        buildings: buildingCount,
-        floors: floorCount,
-        walls: wallCount,
-        columns: columnCount,
-        doors: doorCount,
-        windows: windowCount,
-      },
-      costs: {
+        totalProjects,
+        activeProjects,
+        completedProjects,
+        draftProjects: totalProjects - activeProjects - completedProjects,
+        totalMaterials,
         totalEstimatedCost,
-        totalArea,
-        avgCostPerSqft,
-        costByCategory,
       },
-      recentProjects,
+      materialDistribution,
+      projectTypeDistribution,
+      recentProjects: recentProjects.map(addId),
+      recentEstimations: costEstimations.map(addId),
+    });
+  } catch (err) { next(err); }
+};
+
+// GET /api/bim/analytics/project/:id — single project analytics
+exports.getProjectAnalytics = async (req, res, next) => {
+  try {
+    const project = await prisma.bIMProject.findUnique({ where: { id: req.params.id } });
+    if (!project) return res.status(404).json({ message: 'BIM project not found' });
+
+    const [estimations, history, drawings] = await Promise.all([
+      prisma.costEstimation.findMany({ where: { bim_project_id: req.params.id }, orderBy: { createdAt: 'desc' } }),
+      prisma.designHistory.findMany({ where: { bim_project_id: req.params.id }, take: 20, orderBy: { createdAt: 'desc' } }),
+      prisma.drawingFile.findMany({ where: { bim_project_id: req.params.id }, orderBy: { createdAt: 'desc' } }),
+    ]);
+
+    const buildingData = typeof project.building_data === 'object' ? project.building_data : {};
+    const floors = buildingData.floors || [];
+    const walls = buildingData.walls || [];
+    const doors = buildingData.doors || [];
+    const windows = buildingData.windows || [];
+
+    res.json({
+      project: addId(project),
+      elementCounts: { floors: floors.length, walls: walls.length, doors: doors.length, windows: windows.length },
+      estimations: estimations.map(addId),
+      history: history.map(addId),
+      drawings: drawings.map(addId),
+      totalEstimatedCost: estimations.reduce((sum, e) => sum + (e.total_cost || 0), 0),
     });
   } catch (err) { next(err); }
 };

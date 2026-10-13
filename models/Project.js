@@ -94,6 +94,15 @@ const projectSchema = new mongoose.Schema({
     min: 0,
     max: 100,
   },
+  project_type: {
+    type: String,
+    enum: ['residential', 'commercial', 'industrial', 'infrastructure', 'mixed_use', 'renovation'],
+    default: 'residential',
+  },
+  image_url: {
+    type: String,
+    default: null,
+  },
   risk_level: {
     type: String,
     enum: ['low', 'medium', 'high'],
