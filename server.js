@@ -133,6 +133,8 @@ const server = http.createServer(app);
 // CORS â€” build allowed origins from CLIENT_URL + known production URLs
 const allowedOrigins = [
   "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
   "https://city-client.vercel.app",
   "https://city-client-mgr2.vercel.app",
 ];

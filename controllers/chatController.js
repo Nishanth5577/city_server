@@ -3,13 +3,14 @@ const addId = (o) => o ? { ...o, _id: o.id } : o;
 
 exports.getMessages = async (req, res, next) => {
   try {
-    const { project_id, receiver_id, page = 1, limit = 50 } = req.query;
+    const targetUserId = req.params.userId || req.query.receiver_id || req.query.receiver;
+    const { project_id, page = 1, limit = 50 } = req.query;
     const where = {};
     if (project_id) where.project_id = project_id;
-    if (receiver_id) {
+    if (targetUserId) {
       where.OR = [
-        { sender_id: req.user.userId, receiver_id },
-        { sender_id: receiver_id, receiver_id: req.user.userId },
+        { sender_id: req.user.userId, receiver_id: targetUserId },
+        { sender_id: targetUserId, receiver_id: req.user.userId },
       ];
     }
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -26,6 +27,14 @@ exports.sendMessage = async (req, res, next) => {
   try {
     const data = { ...req.body, sender_id: req.user.userId };
     delete data._id;
+    if (data.receiver && !data.receiver_id) {
+      data.receiver_id = data.receiver;
+    }
+    delete data.receiver;
+    if (data.project && !data.project_id) {
+      data.project_id = data.project;
+    }
+    delete data.project;
     if (req.file) { data.attachment = `/uploads/${req.file.filename}`; data.att_name = req.file.originalname; data.att_type = req.file.mimetype; }
     const message = await prisma.message.create({ data, include: { sender: { select: { id: true, name: true, profile_image: true } } } });
     // Emit via socket
